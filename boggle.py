@@ -7,6 +7,16 @@ class Boggle:
     def __init__(self):
         # pygame setup
         pygame.init()
+        pygame.mixer.init()
+        pygame.mixer.music.load('music.mp3')
+        self.click_sound = pygame.mixer.Sound('click.mp3')
+        self.correct_sound = pygame.mixer.Sound('correct.mp3')
+        self.wrong_sound = pygame.mixer.Sound('wrong.mp3')
+        self.click_sound.set_volume(0.25)
+        self.correct_sound.set_volume(0.25)
+        self.wrong_sound.set_volume(0.15)
+        pygame.mixer.music.set_volume(.5)
+        pygame.mixer.music.play(-1)
         self.board_width = 600
         self.board_height = 600
         self.window_width = self.board_width + 400
@@ -43,16 +53,22 @@ class Boggle:
         self.font_messages = pygame.font.Font(None, self.font_size_messages)
 
         self.word = ''
+        self.creating_word = False
         self.words = []
         self.points = 0
         self.dictionary = enchant.Dict('en_US')
         self.messages = []
+        self.last_selected = ()
+        self.using_mouse_controls = False
+        self.mouse_pos = ()
+        self.space_held_down = False
 
         # Colors
         self.background_color = (255, 255, 255)
         self.tile_color = (255, 255, 255)  # Light Gray
         self.tile_hovered_color = (255, 0, 0)
         self.tile_selected_color = (0, 255, 0)
+        self.tile_last_selected_color = (255, 255, 0)
         self.text_color = (0, 0, 0)  # Black
 
         self.hovered_row = 0
@@ -61,12 +77,23 @@ class Boggle:
         self.main_loop()
 
     def handle_events(self):
+        self.mouse_pos = pygame.mouse.get_pos()
         # poll for events
         # pygame.QUIT event means the user clicked X to close your window
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+
+            if event.type == pygame.MOUSEMOTION:
+                self.using_mouse_controls = True
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                self.tile_clicked_action()
+
+
             if event.type == pygame.KEYDOWN:
+                self.using_mouse_controls = False
+
                 if event.key == pygame.K_RIGHT:
                     if self.hovered_col < self.dim-1:
                         self.hovered_col += 1
@@ -80,21 +107,43 @@ class Boggle:
                     if self.hovered_row > 0:
                         self.hovered_row -= 1
                 if event.key == pygame.K_SPACE:
-                    index = self.get_index_from_pos(self.hovered_row, self.hovered_col)
+                    self.tile_clicked_action()
 
-                    if self.die[index].is_selected:
-                        if self.is_valid_word():
-                            self.words.append(self.word)
-                            print(self.word + ' was a word! You got ' + str(self.calculate_points()) + ' point(s).')
-                            self.messages.append(self.word + ' was a word! You got ' + str(self.calculate_points()) + ' point(s).')
-                            self.points += self.calculate_points()
-                            print('Your current score is ' + str(self.points))
-                            self.messages.append('Your current score is ' + str(self.points))
-                        self.word = ''
-                        self.reset_dice_selection()
-                    else:
-                        self.word += self.die[index].letter
-                        self.die[index].is_selected = True
+    def tile_clicked_action(self):
+        index = self.get_index_from_pos(self.hovered_row, self.hovered_col)
+
+        if self.die[index].is_selected:
+            if self.is_valid_word():
+                self.correct_sound.play()
+                self.words.append(self.word)
+                print(self.word + ' was a word! You got ' + str(self.calculate_points()) + ' point(s).')
+                self.messages.append(self.word + ' was a word! You got ' + str(self.calculate_points()) + ' point(s).')
+                self.points += self.calculate_points()
+                print('Your current score is ' + str(self.points))
+                self.messages.append('Your current score is ' + str(self.points))
+            else:
+                self.wrong_sound.play()
+            self.last_selected = (10, 10)
+            self.creating_word = False
+            self.word = ''
+            self.reset_dice_selection()
+        else:
+            if self.creating_word is False:
+                self.last_selected = (self.hovered_row, self.hovered_col)
+            self.creating_word = True
+            print(self.get_pos_from_index(index))
+            print(self.last_selected)
+            if self.is_streamed_letter(index):
+                self.last_selected = (self.hovered_row, self.hovered_col)
+                self.click_sound.play()
+                self.word += self.die[index].letter
+                self.die[index].is_selected = True
+
+    def is_streamed_letter(self, index):
+        pos = self.get_pos_from_index(index) # pos of selection
+        if self.last_selected[0] - 1 <= pos[0] <= self.last_selected[0] + 1 and self.last_selected[1] - 1 <= pos[1] <= self.last_selected[1] + 1:
+            return True
+        return False
 
     def calculate_points(self):
         if 3 <= len(self.word) <= 4:
@@ -142,6 +191,10 @@ class Boggle:
             self.handle_events()
             self.render_graphics()
 
+            if self.using_mouse_controls:
+                self.hovered_row = self.mouse_pos[1] // self.tile_size
+                self.hovered_col = self.mouse_pos[0] // self.tile_size
+
             for i in range(self.dim*self.dim):
                 if self.get_pos_from_index(i)[0] == self.hovered_row and self.get_pos_from_index(i)[1] == self.hovered_col:
                     self.die[i].is_hovered = True
@@ -179,7 +232,10 @@ class Boggle:
 
             # Draw the tile
             if current_dice.is_selected:
-                pygame.draw.rect(self.screen, self.tile_selected_color, (x, y, self.tile_size, self.tile_size))
+                if row == self.last_selected[0] and col == self.last_selected[1]:
+                    pygame.draw.rect(self.screen, self.tile_last_selected_color, (x, y, self.tile_size, self.tile_size))
+                else:
+                    pygame.draw.rect(self.screen, self.tile_selected_color, (x, y, self.tile_size, self.tile_size))
             elif current_dice.is_hovered:
                 pygame.draw.rect(self.screen, self.tile_hovered_color, (x, y, self.tile_size, self.tile_size))
             else:
